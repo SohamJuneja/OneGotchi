@@ -1,11 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { OneChainService } from '../services/OneChainService';
-import { SuiClient } from '@mysten/sui.js/client';
-import { ONECHAIN_CONFIG } from '../config/onechain';
-
-// Initialize Client for reading data
-const client = new SuiClient({ url: ONECHAIN_CONFIG.rpcUrl });
 
 export const useOnePet = () => {
   const account = useCurrentAccount();

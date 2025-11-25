@@ -1,5 +1,3 @@
-import { getFullnodeUrl } from '@mysten/sui.js/client';
-
 export const ONECHAIN_CONFIG = {
   // Network Details
   network: 'testnet',

@@ -21,7 +21,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <SuiClientProvider networks={networkConfig} defaultNetwork="onechain">
-        <WalletProvider autoConnect>
+        <WalletProvider 
+          autoConnect
+          preferredWallets={['OneWallet']}
+          enableUnsafeBurner={false}
+        >
           <div className="app">
             <EvolvagotchiGame />
           </div>

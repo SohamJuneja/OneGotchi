@@ -1,0 +1,871 @@
+import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
+import { parseEther } from 'viem'
+import { Heart, Drumstick, Sparkles, RefreshCw, Zap, BookOpen, Gamepad2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { PetChat } from './PetChat'
+import { EventNotification } from './EventNotification'
+import  EventHistory  from './EventHistory'
+import { NFTArtGenerator } from './NFTArtGenerator'
+import { PetTimeline } from './PetTimeline'
+import { HealthAdvisor } from './HealthAdvisor'
+import { AchievementGallery } from './AchievementGallery'
+import { AchievementToast } from './AchievementToast'
+import { GameSelectionModal } from './GameSelectionModal'
+import { MemoryGame } from './MemoryGame'
+import { TicTacToe } from './TicTacToe'
+import { RockPaperScissors } from './RockPaperScissors'
+import { getPetResponse } from '../services/groqService'
+import { triggerRandomEvent, shouldTriggerEvent, getEventChance } from '../services/eventService'
+import type { GameEvent } from '../services/eventService'
+import { addPendingEvent, applyEventEffects, clearPendingEvents, getPendingEvents, hasPendingEvents } from '../services/eventStorage'
+import { logEvolution, logFeed, logPlay, logRandomEvent } from '../services/petHistory'
+import { useAchievements } from '../hooks/useAchievements'
+import { useUSDO, PRICES } from '../hooks/useUSDO'
+import contractABI from '../contracts/Evolvagotchi.json'
+
+const CONTRACT_ADDRESS = contractABI.address as `0x${string}`
+const EVOLUTION_STAGES = ['🥚 Egg', '🐣 Baby', '🦖 Teen', '🐲 Adult']
+const STAGE_COLORS = ['#e0e0e0', '#ffeb3b', '#ff9800', '#f44336']
+// const DEATH_STAGE = '👻 Ghost' // For future use
+
+interface PetDetailProps {
+  tokenId: number
+  isCorrectNetwork: boolean
+  demoOverrides?: {
+    age?: number
+    evolutionStage?: number
+    happiness?: number
+    hunger?: number
+    health?: number
+  }
+  demoControls?: React.ReactNode
+  showEventHistory: boolean
+  setShowEventHistory: (show: boolean) => void
+}
+
+export function PetDetail({ tokenId, isCorrectNetwork, demoOverrides, demoControls, showEventHistory, setShowEventHistory }: PetDetailProps) {
+  const { writeContract, data: hash, isPending } = useWriteContract()
+  const { address } = useAccount()
+  const achievements = useAchievements(tokenId, address)
+  const usdo = useUSDO()
+  const [txStatus, setTxStatus] = useState('')
+  const [petReaction, setPetReaction] = useState('')
+  const [showReaction, setShowReaction] = useState(false)
+  const [currentEvent, setCurrentEvent] = useState<GameEvent | null>(null)
+  const [lastEventTime, setLastEventTime] = useState<number | null>(null)
+  const [interactionCount, setInteractionCount] = useState(0)
+  const [isGeneratingEvent, setIsGeneratingEvent] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [showPendingBanner, setShowPendingBanner] = useState(true)
+  const [previousStage, setPreviousStage] = useState<number | null>(null)
+  const [showEvolutionEffect, setShowEvolutionEffect] = useState(false)
+  const [showTimeline, setShowTimeline] = useState(false)
+  const [activeGame, setActiveGame] = useState<'selection' | 'memory' | 'tictactoe' | 'rps' | null>(null)
+  const [isApprovingFeed, setIsApprovingFeed] = useState(false)
+  const [isApprovingRevive, setIsApprovingRevive] = useState(false)
+
+  const { data: petInfo, refetch: refetchPetInfo } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: contractABI.abi,
+    functionName: 'getPetInfo',
+    args: [BigInt(tokenId)],
+  })
+
+  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
+    hash,
+  })
+
+  useEffect(() => {
+    if (isConfirming) {
+      setTxStatus('⏳ Transaction pending...')
+    } else if (isConfirmed) {
+      const wasSyncing = isSyncing
+      const hasPending = hasPendingEvents(tokenId)
+      
+      // Clear pending events after successful transaction
+      if (hasPending || wasSyncing) {
+        clearPendingEvents(tokenId)
+        setTxStatus('✅ Events synced to blockchain!')
+      } else {
+        setTxStatus('✅ Transaction confirmed!')
+      }
+      
+      // Always clear syncing state on confirmation
+      setIsSyncing(false)
+      
+      refetchPetInfo()
+      setTimeout(() => setTxStatus(''), 3000)
+      
+      // Increment interaction count
+      setInteractionCount(prev => prev + 1)
+      
+      // Check for random event (but not when syncing)
+      if (!wasSyncing) {
+        checkForRandomEvent()
+      }
+    }
+  }, [isConfirming, isConfirmed, refetchPetInfo, tokenId])
+
+  const checkForRandomEvent = async () => {
+    if (!pet || isGeneratingEvent) return
+    
+    // Check if enough time has passed
+    if (!shouldTriggerEvent(lastEventTime)) return
+    
+    // Random chance based on interactions
+    const chance = getEventChance(interactionCount)
+    if (Math.random() > chance) return
+    
+    setIsGeneratingEvent(true)
+    
+    const event = await triggerRandomEvent({
+      name: stats.name,
+      evolutionStage: stats.evolutionStage,
+      happiness: stats.happiness,
+      hunger: stats.hunger,
+      health: stats.health,
+      age: stats.age,
+    })
+    
+    // Add event to storage immediately when generated
+    addPendingEvent(tokenId, event)
+    
+    setCurrentEvent(event)
+    setLastEventTime(Date.now())
+    setIsGeneratingEvent(false)
+  }
+
+  const handleCloseEvent = () => {
+    // Just close the notification, event already stored
+    setCurrentEvent(null)
+  }
+
+  const handleSyncEvents = async () => {
+    setIsSyncing(true)
+    try {
+      const pending = getPendingEvents(tokenId)
+      
+      // If we have event effects, apply them via contract
+      if (pending.events.length > 0) {
+        writeContract({
+          address: CONTRACT_ADDRESS,
+          abi: contractABI.abi,
+          functionName: 'applyEventEffects',
+          args: [
+            BigInt(tokenId),
+            Math.floor(pending.totalHappiness),
+            Math.floor(pending.totalHunger),
+            Math.floor(pending.totalHealth),
+          ],
+        })
+      } else {
+        // No events, just regular update
+        writeContract({
+          address: CONTRACT_ADDRESS,
+          abi: contractABI.abi,
+          functionName: 'updateState',
+          args: [BigInt(tokenId)],
+        })
+      }
+      
+      // Wait for confirmation, then clear (handled by useEffect)
+    } catch (error) {
+      console.error('Sync error:', error)
+      setIsSyncing(false)
+    }
+  }
+
+  const handleTriggerEvent = async () => {
+    if (!pet || isGeneratingEvent) return
+    
+    setIsGeneratingEvent(true)
+    
+    const event = await triggerRandomEvent({
+      name: stats.name,
+      evolutionStage: stats.evolutionStage,
+      happiness: stats.happiness,
+      hunger: stats.hunger,
+      health: stats.health,
+      age: stats.age,
+    })
+    
+    // Add event to storage immediately when generated
+    addPendingEvent(tokenId, event)
+    
+    // Log to history
+    logRandomEvent(tokenId, stats.name, event.title, event.description, {
+      happiness: stats.happiness,
+      hunger: stats.hunger,
+      health: stats.health,
+    })
+    
+    setCurrentEvent(event)
+    setLastEventTime(Date.now())
+    setIsGeneratingEvent(false)
+  }
+
+  const handleFeed = async () => {
+    try {
+      // Step 1: Check USDO balance
+      if (!usdo.hasEnoughBalance(PRICES.FEED)) {
+        alert(`Insufficient USDO! You need ${PRICES.FEED} USDO to feed your pet. Click "Get Free USDO" to claim tokens from the faucet.`)
+        return
+      }
+
+      // Step 2: Check and request approval if needed
+      if (usdo.needsApproval(PRICES.FEED)) {
+        setIsApprovingFeed(true)
+        setTxStatus('⏳ Approving USDO for feeding...')
+        
+        try {
+          await usdo.approve(parseEther('1000')) // Approve 1000 USDO for future feeds
+          
+          // Wait for approval confirmation
+          while (usdo.isConfirming) {
+            await new Promise(resolve => setTimeout(resolve, 500))
+          }
+          
+          setTxStatus('✅ USDO approved! Now feeding...')
+        } catch (approvalError) {
+          console.error('Approval error:', approvalError)
+          setTxStatus('❌ Approval rejected')
+          setIsApprovingFeed(false)
+          setTimeout(() => setTxStatus(''), 3000)
+          return
+        } finally {
+          setIsApprovingFeed(false)
+        }
+      }
+
+      // Step 3: Feed the pet (USDO transferred via approval)
+      writeContract({
+        address: CONTRACT_ADDRESS,
+        abi: contractABI.abi,
+        functionName: 'feed',
+        args: [BigInt(tokenId)],
+        // No value - USDO transferred via transferFrom
+      })
+      
+      // Record achievement locally (no blockchain transaction!)
+      achievements.recordFeed()
+      
+      // Log to history
+      logFeed(tokenId, stats.name, {
+        happiness: stats.happiness,
+        hunger: stats.hunger,
+        health: stats.health,
+      })
+      
+      // Get AI reaction
+      if (pet) {
+        const reaction = await getPetResponse({
+          name: stats.name,
+          evolutionStage: stats.evolutionStage,
+          happiness: stats.happiness,
+          hunger: stats.hunger,
+          health: stats.health,
+          age: stats.age,
+          interaction: 'feed',
+        })
+        setPetReaction(reaction)
+        setShowReaction(true)
+        setTimeout(() => setShowReaction(false), 5000)
+      }
+    } catch (error) {
+      console.error('Feed error:', error)
+      setTxStatus('❌ Feed failed')
+      setTimeout(() => setTxStatus(''), 3000)
+    }
+  }
+
+  const handlePlay = async () => {
+    try {
+      writeContract({
+        address: CONTRACT_ADDRESS,
+        abi: contractABI.abi,
+        functionName: 'play',
+        args: [BigInt(tokenId)],
+      })
+      
+      // Record achievement locally (no blockchain transaction!)
+      achievements.recordPlay()
+      
+      // Log to history
+      logPlay(tokenId, stats.name, {
+        happiness: stats.happiness,
+        hunger: stats.hunger,
+        health: stats.health,
+      })
+      
+      // Get AI reaction
+      if (pet) {
+        const reaction = await getPetResponse({
+          name: stats.name,
+          evolutionStage: stats.evolutionStage,
+          happiness: stats.happiness,
+          hunger: stats.hunger,
+          health: stats.health,
+          age: stats.age,
+          interaction: 'play',
+        })
+        setPetReaction(reaction)
+        setShowReaction(true)
+        setTimeout(() => setShowReaction(false), 5000)
+      }
+    } catch (error) {
+      console.error('Play error:', error)
+    }
+  }
+
+  const handleGameWin = (gameName: string) => {
+    // Store the game name in localStorage for AI chat
+    localStorage.setItem('lastGameWon', gameName)
+    
+    // First close the game modal
+    setActiveGame(null)
+    
+    // Then trigger the play reward
+    setTimeout(() => {
+      handlePlay()
+    }, 100)
+  }
+
+  const handleUpdateState = async () => {
+    try {
+      // If there are pending events, sync them first
+      if (hasPending) {
+        setIsSyncing(true)
+        await handleSyncEvents()
+      } else {
+        // Regular update
+        writeContract({
+          address: CONTRACT_ADDRESS,
+          abi: contractABI.abi,
+          functionName: 'updateState',
+          args: [BigInt(tokenId)],
+        })
+      }
+    } catch (error) {
+      console.error('Update error:', error)
+      setIsSyncing(false)
+    }
+  }
+
+  const handleRevive = async () => {
+    try {
+      // Step 1: Check USDO balance
+      if (!usdo.hasEnoughBalance(PRICES.REVIVE)) {
+        alert(`Insufficient USDO! You need ${PRICES.REVIVE} USDO to revive your pet. Click "Get Free USDO" to claim tokens from the faucet.`)
+        return
+      }
+
+      // Step 2: Check and request approval if needed
+      if (usdo.needsApproval(PRICES.REVIVE)) {
+        setIsApprovingRevive(true)
+        setTxStatus('⏳ Approving USDO for revival...')
+        
+        try {
+          await usdo.approve(parseEther('1000')) // Approve 1000 USDO for future actions
+          
+          // Wait for approval confirmation
+          while (usdo.isConfirming) {
+            await new Promise(resolve => setTimeout(resolve, 500))
+          }
+          
+          setTxStatus('✅ USDO approved! Now reviving...')
+        } catch (approvalError) {
+          console.error('Approval error:', approvalError)
+          setTxStatus('❌ Approval rejected')
+          setIsApprovingRevive(false)
+          setTimeout(() => setTxStatus(''), 3000)
+          return
+        } finally {
+          setIsApprovingRevive(false)
+        }
+      }
+
+      // Step 3: Revive the pet (USDO transferred via approval)
+      writeContract({
+        address: CONTRACT_ADDRESS,
+        abi: contractABI.abi,
+        functionName: 'revive',
+        args: [BigInt(tokenId)],
+        // No value - USDO transferred via transferFrom
+      })
+      
+      // Record achievement locally (no blockchain transaction!)
+      achievements.recordRevival()
+    } catch (error) {
+      console.error('Revive error:', error)
+      setTxStatus('❌ Revive failed')
+      setTimeout(() => setTxStatus(''), 3000)
+    }
+  }
+
+  const pet = petInfo as any
+
+  if (!pet) {
+    return <div className="loading">Loading pet details...</div>
+  }
+
+  const baseStats = {
+    name: pet[0] as string,
+    birthDate: pet[1],
+    age: Number(pet[2]),
+    evolutionStage: Number(pet[3]),
+    happiness: Number(pet[4]),
+    hunger: Number(pet[5]),
+    health: Number(pet[6]),
+    blocksSinceUpdate: Number(pet[7]),
+    isDead: Boolean(pet[8]),
+    deathTimestamp: Number(pet[9]),
+  }
+
+  // Apply event effects to stats (only if not in demo mode)
+  const statsWithEvents = demoOverrides ? baseStats : {
+    ...baseStats,
+    ...applyEventEffects(
+      { happiness: baseStats.happiness, hunger: baseStats.hunger, health: baseStats.health },
+      tokenId
+    ),
+  }
+
+  // Apply demo overrides if provided
+  const stats = {
+    ...statsWithEvents,
+    age: demoOverrides?.age ?? statsWithEvents.age,
+    evolutionStage: demoOverrides?.evolutionStage ?? statsWithEvents.evolutionStage,
+    happiness: demoOverrides?.happiness ?? statsWithEvents.happiness,
+    hunger: demoOverrides?.hunger ?? statsWithEvents.hunger,
+    health: demoOverrides?.health ?? statsWithEvents.health,
+  }
+
+  const isDemoActive = !!demoOverrides && Object.keys(demoOverrides).length > 0
+  const hasPending = hasPendingEvents(tokenId)
+
+  // First pet achievement (check once on mount)
+  useEffect(() => {
+    // Award "First Steps" achievement for owning this pet
+    achievements.recordFirstPet()
+  }, []) // Only run once on mount
+
+  // Evolution detection effect
+  useEffect(() => {
+    if (previousStage !== null && stats.evolutionStage > previousStage) {
+      // Evolution detected!
+      setShowEvolutionEffect(true)
+      setTimeout(() => setShowEvolutionEffect(false), 3000) // Hide after 3 seconds
+      
+      // Log evolution to history
+      logEvolution(tokenId, stats.name, previousStage, stats.evolutionStage, EVOLUTION_STAGES[stats.evolutionStage])
+      
+      // Record evolution achievement locally (no blockchain transaction!)
+      achievements.recordEvolution(stats.evolutionStage)
+    }
+    
+    setPreviousStage(stats.evolutionStage)
+  }, [stats.evolutionStage, previousStage])
+
+  // Perfect stats detection
+  useEffect(() => {
+    if (stats.happiness === 100 && stats.hunger === 0 && stats.health === 100) {
+      // Record achievement locally (no blockchain transaction!)
+      achievements.recordPerfectStats()
+    }
+  }, [stats.happiness, stats.hunger, stats.health])
+
+  // Death detection - Log when pet dies
+  useEffect(() => {
+    if (stats.isDead && stats.deathTimestamp > 0) {
+      // Log death to history if it's new
+      const deathTime = stats.deathTimestamp * 1000 // Convert to ms
+      const now = Date.now()
+      
+      // Only log if death happened recently (within last hour) to avoid logging old deaths
+      if (now - deathTime < 3600000) {
+        logRandomEvent(tokenId, stats.name, '💀 Death', `${stats.name} has died`, {
+          happiness: stats.happiness,
+          hunger: stats.hunger,
+          health: 0,
+        })
+      }
+    }
+  }, [stats.isDead, stats.deathTimestamp])
+
+  // Auto-hide pending banner after 10 seconds
+  useEffect(() => {
+    if (hasPending && showPendingBanner) {
+      const timer = setTimeout(() => {
+        setShowPendingBanner(false)
+      }, 10000) // 10 seconds
+
+      return () => clearTimeout(timer)
+    }
+  }, [hasPending, showPendingBanner])
+
+  // Reset banner visibility when hasPending changes
+  useEffect(() => {
+    if (hasPending) {
+      setShowPendingBanner(true)
+    }
+  }, [hasPending])
+
+  // Calculate time in human-readable format (assuming ~6 blocks/sec)
+  const ageInSeconds = Math.floor(stats.age / 6)
+  const ageInMinutes = Math.floor(ageInSeconds / 60)
+  const ageInHours = Math.floor(ageInMinutes / 60)
+  const displayAge = ageInHours > 0 
+    ? `${ageInHours}h ${ageInMinutes % 60}m` 
+    : `${ageInMinutes}m ${ageInSeconds % 60}s`
+
+  return (
+    <div className="pet-detail">
+      {isDemoActive && (
+        <div className="demo-badge">
+          🎮 Demo Mode Active - Stats are simulated
+        </div>
+      )}
+
+      {/* USDO Balance Info Bar */}
+      <div style={{ 
+        padding: '12px 16px', 
+        background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(251, 191, 36, 0.1))',
+        borderRadius: '12px',
+        marginBottom: '16px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        border: '1px solid rgba(59, 130, 246, 0.3)'
+      }}>
+        <div>
+          <strong style={{ color: '#1e40af' }}>Your USDO:</strong>
+          <span style={{ marginLeft: '8px', color: '#fbbf24', fontWeight: 600, fontSize: '18px' }}>
+            {parseFloat(usdo.balanceFormatted).toFixed(2)}
+          </span>
+        </div>
+        <button 
+          onClick={usdo.claimFaucet}
+          disabled={usdo.isConfirming}
+          className="btn btn-small"
+        >
+          Get Free USDO
+        </button>
+      </div>
+
+      {hasPending && !isDemoActive && showPendingBanner && (
+        <div className="sync-banner">
+          <span>📊 You have pending events! Stats shown include event effects.</span>
+          <div className="sync-banner-actions">
+            <button className="btn btn-small" onClick={() => setShowEventHistory(!showEventHistory)}>
+              {showEventHistory ? 'Hide' : 'View'} Events
+            </button>
+            <button className="btn btn-small btn-close" onClick={() => setShowPendingBanner(false)}>
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      {txStatus && (
+        <div className="notification">
+          {txStatus}
+        </div>
+      )}
+
+      {showReaction && petReaction && (
+        <div className="pet-reaction">
+          <div className="reaction-bubble">
+            {petReaction}
+          </div>
+        </div>
+      )}
+
+      {currentEvent && (
+        <EventNotification event={currentEvent} onClose={handleCloseEvent} />
+      )}
+
+      {/* Achievement Toast Notifications */}
+      {achievements.newAchievements.map((achievementId) => (
+        <AchievementToast
+          key={achievementId}
+          achievementId={achievementId}
+          onClose={() => {}}
+        />
+      ))}
+
+      {showEvolutionEffect && (
+        <div className="evolution-effect">
+          <div className="evolution-content">
+            <Sparkles size={64} className="evolution-icon" />
+            <h2>Evolution!</h2>
+            <p>{stats.name} evolved to {EVOLUTION_STAGES[stats.evolutionStage]}!</p>
+          </div>
+        </div>
+      )}
+
+      {showEventHistory && (
+        <div className="event-history-modal">
+          <EventHistory 
+            tokenId={tokenId} 
+            onSync={handleSyncEvents}
+            isSyncing={isSyncing}
+          />
+        </div>
+      )}
+
+      {showTimeline && (
+        <PetTimeline
+          tokenId={tokenId}
+          petName={stats.name}
+          onClose={() => setShowTimeline(false)}
+        />
+      )}
+
+      <div className="pet-and-chat-grid">
+        {/* Pet Card Section */}
+        <div className="pet-display">
+          <div className="pet-card" style={{ borderColor: STAGE_COLORS[stats.evolutionStage] }}>
+            <div className="pet-header">
+              <h2 className="pet-name">{stats.name}</h2>
+              <span className="pet-stage" style={{ background: STAGE_COLORS[stats.evolutionStage] }}>
+                {EVOLUTION_STAGES[stats.evolutionStage]}
+              </span>
+            </div>
+
+            <div className="pet-visual" data-stage={stats.isDead ? 'dead' : stats.evolutionStage}>
+              <div className="stage-background"></div>
+              <div className="stage-particles">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <div key={i} className="particle"></div>
+                ))}
+              </div>
+              <div className="pet-emoji">
+                {stats.isDead ? '👻' : EVOLUTION_STAGES[stats.evolutionStage].split(' ')[0]}
+              </div>
+              {stats.isDead && (
+                <div className="death-overlay">
+                  <div className="death-content">
+                    <h3>💀 Your Pet Has Died</h3>
+                    <p>Your {stats.name} has passed away...</p>
+                    <p className="revival-prompt">Pay {REVIVAL_COST} OCT to bring them back to life!</p>
+                    <button
+                      className="btn btn-revive"
+                      onClick={handleRevive}
+                      disabled={isPending || !isCorrectNetwork}
+                    >
+                      💚 Revive for {REVIVAL_COST} OCT
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="pet-stats">
+              <div className="stat">
+                <div className="stat-header">
+                  <Heart size={16} color="#e91e63" />
+                  <span>Health</span>
+                  <span className="stat-value">{stats.health}</span>
+                </div>
+                <div className="stat-bar">
+                  <div className="stat-fill health" style={{ width: `${stats.health}%` }} />
+                </div>
+              </div>
+
+              <div className="stat">
+                <div className="stat-header">
+                  <Sparkles size={16} color="#ffc107" />
+                  <span>Happiness</span>
+                  <span className="stat-value">{stats.happiness}</span>
+                </div>
+                <div className="stat-bar">
+                  <div className="stat-fill happiness" style={{ width: `${stats.happiness}%` }} />
+                </div>
+              </div>
+
+              <div className="stat">
+                <div className="stat-header">
+                  <Drumstick size={16} color="#ff5722" />
+                  <span>Hunger</span>
+                  <span className="stat-value">{stats.hunger}</span>
+                </div>
+                <div className="stat-bar">
+                  <div className="stat-fill hunger" style={{ width: `${stats.hunger}%` }} />
+                </div>
+              </div>
+            </div>
+
+            <div className="pet-info-grid">
+              <div className="info-item">
+                <span className="info-label">Age</span>
+                <span className="info-value">{displayAge}</span>
+                <span className="info-subtext">{stats.age.toLocaleString()} blocks</span>
+              </div>
+              <div className="info-item">
+                <span className="info-label">Token ID</span>
+                <span className="info-value">#{tokenId}</span>
+              </div>
+            </div>
+
+            {/* Achievement Badges */}
+            <AchievementGallery petTokenId={BigInt(tokenId)} compact={true} />
+          </div>
+
+          <div className="actions">
+            {stats.isDead ? (
+              <button
+                className="btn btn-action btn-revive"
+                onClick={handleRevive}
+                disabled={isPending || !isCorrectNetwork || isApprovingRevive || !usdo.hasEnoughBalance(PRICES.REVIVE)}
+                style={{ width: '100%', background: '#4caf50' }}
+              >
+                💚 {isApprovingRevive ? 'Approving...' : 
+                    usdo.needsApproval(PRICES.REVIVE) ? `Approve & Revive (${PRICES.REVIVE} USDO)` : 
+                    `Revive Pet (${PRICES.REVIVE} USDO)`}
+              </button>
+            ) : (
+              <>
+                <button
+                  className="btn btn-action btn-feed"
+                  onClick={handleFeed}
+                  disabled={isPending || !isCorrectNetwork || isApprovingFeed || !usdo.hasEnoughBalance(PRICES.FEED)}
+                >
+                  <Drumstick size={20} />
+                  {isApprovingFeed ? 'Approving...' : 
+                   usdo.needsApproval(PRICES.FEED) ? `Approve & Feed (${PRICES.FEED} USDO)` : 
+                   `Feed (${PRICES.FEED} USDO)`}
+                </button>
+
+                <button
+                  className="btn btn-action btn-play"
+                  onClick={() => setActiveGame('selection')}
+                  disabled={isPending || !isCorrectNetwork}
+                >
+                  <Gamepad2 size={20} />
+                  Play Game (Free)
+                </button>
+
+                <button
+                  className="btn btn-action btn-update"
+                  onClick={handleUpdateState}
+                  disabled={isPending || !isCorrectNetwork || isSyncing}
+                >
+                  <RefreshCw size={20} />
+                  {hasPending ? 'Sync & Update' : 'Update Stats'}
+                </button>
+
+                <button
+                  className="btn btn-action btn-event"
+                  onClick={handleTriggerEvent}
+                  disabled={isGeneratingEvent}
+                >
+                  <Zap size={20} />
+                  {isGeneratingEvent ? 'Generating...' : 'Trigger Event'}
+                </button>
+
+                <button
+                  className="btn btn-action btn-timeline"
+                  onClick={() => setShowTimeline(true)}
+                >
+                  <BookOpen size={20} />
+                  View Timeline
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* NFT Art Generator - Below action buttons */}
+          <NFTArtGenerator
+            tokenId={tokenId}
+            petName={stats.name}
+            evolutionStage={stats.evolutionStage}
+            happiness={stats.happiness}
+            hunger={stats.hunger}
+            health={stats.health}
+          />
+        </div>
+
+        {/* Right Side - AI Chat & Health Advisor */}
+        <div className="chat-container">
+          {/* AI Chat Section */}
+          <PetChat
+            petName={stats.name}
+            evolutionStage={stats.evolutionStage}
+            happiness={stats.happiness}
+            hunger={stats.hunger}
+            health={stats.health}
+            age={stats.age}
+          />
+          
+          {/* Health Advisor - Proactive guidance system */}
+          <HealthAdvisor 
+            stats={{
+              health: stats.health,
+              happiness: stats.happiness,
+              hunger: stats.hunger,
+              age: stats.age,
+              evolutionStage: stats.evolutionStage,
+              isDead: stats.isDead,
+            }}
+            onAction={(action) => {
+              // Handle quick actions from advisor
+              if (action.includes('Feed')) {
+                handleFeed()
+              } else if (action.includes('Play')) {
+                setActiveGame('selection')
+              } else if (action.includes('Update') || action.includes('evolve')) {
+                handleUpdateState()
+              } else if (action.includes('Revive')) {
+                handleRevive()
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Demo Controls - Above AI Agent Features */}
+      {demoControls}
+
+      <div className="info-section">
+        <h3>🤖 AI Agent Features</h3>
+        <ul className="feature-list">
+          <li>✅ Stats decay automatically every ~78 seconds (hunger) and ~2.6 minutes (happiness)</li>
+          <li>✅ Pet evolves automatically when conditions are met</li>
+          <li>✅ Health decreases if hunger gets too high</li>
+          <li>✅ AI Health Advisor provides proactive guidance</li>
+          <li>✅ Death/Revival system with ghost state</li>
+          <li>✅ Optimized for OneChain's high-speed blockchain!</li>
+        </ul>
+      </div>
+
+      {/* Game Modals */}
+      {activeGame === 'selection' && (
+        <GameSelectionModal
+          onGameSelect={setActiveGame}
+          onClose={() => setActiveGame(null)}
+        />
+      )}
+
+      {activeGame === 'memory' && (
+        <MemoryGame
+          onGameWin={(gameName) => handleGameWin(gameName)}
+          onClose={() => setActiveGame(null)}
+        />
+      )}
+
+      {activeGame === 'tictactoe' && (
+        <TicTacToe
+          onGameWin={(gameName) => handleGameWin(gameName)}
+          onClose={() => setActiveGame(null)}
+        />
+      )}
+
+      {activeGame === 'rps' && (
+        <RockPaperScissors
+          onGameWin={(gameName) => handleGameWin(gameName)}
+          onClose={() => setActiveGame(null)}
+        />
+      )}
+    </div>
+  )
+}

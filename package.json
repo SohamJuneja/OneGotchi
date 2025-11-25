@@ -1,0 +1,24 @@
+{
+  "name": "onepet",
+  "version": "1.0.0",
+  "description": "A decentralized Tamagotchi-style NFT game with USDO payments on OneChain",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deployOnePet.ts --network onechain",
+    "deploy:local": "hardhat run scripts/deployOnePet.ts --network hardhat",
+    "update-frontend": "node scripts/updateFrontendContracts.js"
+  },
+  "keywords": ["onechain", "nft", "game", "usdo", "defi", "tamagotchi"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@openzeppelin/contracts": "^5.4.0",
+    "hardhat": "^2.26.3"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
+  }
+}

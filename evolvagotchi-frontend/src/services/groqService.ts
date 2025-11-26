@@ -154,3 +154,103 @@ export const FALLBACK_RESPONSES = {
     3: 'Welcome back, trainer. I have been waiting. 🐲',
   },
 }
+
+// ===== BATTLE COMMENTARY =====
+
+export interface BattleContext {
+  attackerName: string
+  attackerStage: number
+  attackerHappiness: number
+  attackerHunger: number
+  defenderName: string
+  defenderStage: number
+  defenderHappiness: number
+  defenderHunger: number
+  damage: number
+  defenderHealthRemaining: number
+  isFirstAttack?: boolean
+  isFinalBlow?: boolean
+}
+
+export async function getBattleCommentary(context: BattleContext): Promise<string> {
+  try {
+    const {
+      attackerName,
+      attackerStage,
+      attackerHappiness,
+      attackerHunger,
+      defenderName,
+      defenderStage,
+      damage,
+      defenderHealthRemaining,
+      isFirstAttack,
+      isFinalBlow
+    } = context
+
+    const attackerStageNames = ['Egg', 'Baby', 'Teen', 'Adult']
+    const defenderStageNames = ['Egg', 'Baby', 'Teen', 'Adult']
+
+    let situationContext = ''
+    
+    if (isFirstAttack) {
+      situationContext = 'This is the opening move of the battle! '
+    } else if (isFinalBlow) {
+      situationContext = 'This is the FINAL BLOW that wins the battle! '
+    } else if (defenderHealthRemaining < 20) {
+      situationContext = `${defenderName} is barely hanging on! `
+    } else if (damage > 25) {
+      situationContext = 'That was a CRITICAL HIT! '
+    } else if (damage < 10) {
+      situationContext = 'The attack barely made a dent... '
+    }
+
+    // Attacker condition effects
+    if (attackerHunger > 70) {
+      situationContext += `${attackerName} looks hungry and weak. `
+    } else if (attackerHappiness > 80) {
+      situationContext += `${attackerName} is brimming with confidence! `
+    }
+
+    const prompt = `You are a charismatic battle announcer for a pet fighting arena. Generate exciting, dramatic commentary for this attack.
+
+Battle Action:
+- Attacker: ${attackerName} (${attackerStageNames[attackerStage]} stage)
+- Defender: ${defenderName} (${defenderStageNames[defenderStage]} stage)
+- Damage dealt: ${damage} HP
+- Defender's remaining health: ${defenderHealthRemaining} HP
+
+Context: ${situationContext}
+
+Generate ONE dramatic sentence of commentary (15-25 words) that describes the action. Include emojis. Make it exciting, like a sports announcer!
+
+Examples:
+- "⚡ ${attackerName} strikes with lightning speed, dealing ${damage} damage! ${defenderName} reels back! 💥"
+- "🔥 A devastating blow from ${attackerName}! ${defenderName} takes ${damage} damage and stumbles! 😱"
+- "💪 ${attackerName} channels all their energy into a powerful attack dealing ${damage} damage! ⚔️"
+
+Your commentary:`
+
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an exciting battle announcer. Generate dramatic, concise commentary for pet battles. Keep it short and punchy!',
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      model: 'llama-3.3-70b-versatile',
+      temperature: 1.1, // High creativity for varied commentary
+      max_tokens: 60,
+    })
+
+    const response = completion.choices[0]?.message?.content || `${attackerName} attacks ${defenderName} for ${damage} damage! 💥`
+    return response.trim()
+  } catch (error) {
+    console.error('Groq battle commentary error:', error)
+    // Fallback to simple commentary
+    return `💥 ${context.attackerName} strikes ${context.defenderName} for ${context.damage} damage!`
+  }
+}

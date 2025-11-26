@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "evolvagotchi-frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "evolvagotchi-frontend/dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/evolvagotchi-frontend/$1"
+    }
+  ]
+}

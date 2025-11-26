@@ -100,10 +100,15 @@ module one_pet::game {
         update_state_internal(pet, clock);
         let age = clock::timestamp_ms(clock) - pet.birth_ms;
 
-        // Simple logic: 1 min for Baby, 5 mins for Teen (Demo Speed)
-        if (pet.stage == 0 && age > 60000) { pet.stage = 1; };
-        if (pet.stage == 1 && age > 300000) { pet.stage = 2; };
-        if (pet.stage == 2 && age > 600000) { pet.stage = 3; };
+        // Evolution stages - only evolve ONE stage at a time
+        // 1 min for Baby, 5 mins for Teen, 10 mins for Adult (Demo Speed)
+        if (pet.stage == 0 && age >= 60000) { 
+            pet.stage = 1; 
+        } else if (pet.stage == 1 && age >= 300000) { 
+            pet.stage = 2; 
+        } else if (pet.stage == 2 && age >= 600000) { 
+            pet.stage = 3; 
+        };
     }
 
     // INTERNAL HELPER: Calculate decay
@@ -126,5 +131,26 @@ module one_pet::game {
                 }
             }
         };
+    }
+
+    // === PUBLIC GETTERS FOR BATTLE SYSTEM ===
+    public fun get_pet_name(pet: &Pet): String {
+        pet.name
+    }
+
+    public fun get_pet_hunger(pet: &Pet): u64 {
+        pet.hunger
+    }
+
+    public fun get_pet_happiness(pet: &Pet): u64 {
+        pet.happiness
+    }
+
+    public fun get_pet_stage(pet: &Pet): u8 {
+        pet.stage
+    }
+
+    public fun get_pet_birth(pet: &Pet): u64 {
+        pet.birth_ms
     }
 }

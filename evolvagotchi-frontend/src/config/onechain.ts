@@ -3,14 +3,15 @@ export const ONECHAIN_CONFIG = {
   network: 'testnet',
   rpcUrl: 'https://rpc-testnet.onelabs.cc:443',
   
-  // Your Deployed IDs (OCT-based deployment)
-  PACKAGE_ID: '0xb4465ce5a3efe8dc0960241b9ffebf06e9fa2d8120737199c099a3f35004f206',
+  // Your Deployed IDs (Updated with Evolution Fix!)
+  PACKAGE_ID: '0xa069db9a47bec73fb9c4da36a480ac97e094c58d095ae7efc682d92effc0d9a3',
   
   // System Objects - Full address format required
   CLOCK: '0x0000000000000000000000000000000000000000000000000000000000000006',
   
   // Module Names
   MODULES: {
-    GAME: 'game'
+    GAME: 'game',
+    BATTLE: 'battle_arena'
   }
 };

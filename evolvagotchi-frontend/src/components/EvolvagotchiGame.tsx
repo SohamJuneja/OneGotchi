@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { ConnectButton } from '@mysten/dapp-kit'
-import { ArrowLeft, BookOpen } from 'lucide-react'
+import { ArrowLeft, BookOpen, Swords } from 'lucide-react'
 import { PetList } from './PetList'
 import { PetDetail } from './PetDetailFull'
 import { EvolutionInfo } from './EvolutionInfo'
+import { FightArena } from './FightArena'
 import { useOnePet } from '../hooks/useOnePet'
 
 const MINT_COST = '0.01' // 0.01 OCT for minting
@@ -16,6 +17,7 @@ export function EvolvagotchiGame() {
   const [showMintForm, setShowMintForm] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const [showEventHistory, setShowEventHistory] = useState(false)
+  const [showFightArena, setShowFightArena] = useState(false)
 
   // Get selected pet data
   const selectedPet = pets.find(p => p.id === selectedPetId)
@@ -79,7 +81,12 @@ export function EvolvagotchiGame() {
       </header>
 
       <div className="main-content">
-        {selectedPetId === null ? (
+        {showFightArena ? (
+          <FightArena 
+            myPets={pets} 
+            onBack={() => setShowFightArena(false)} 
+          />
+        ) : selectedPetId === null ? (
           <>
             {/* Pet List View */}
             <div className="left-panel">
@@ -100,6 +107,16 @@ export function EvolvagotchiGame() {
                 style={{ marginTop: '1rem', width: '100%' }}
               >
                 {showMintForm ? 'Cancel' : '+ Mint New Pet'}
+              </button>
+
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => setShowFightArena(true)}
+                style={{ marginTop: '1rem', width: '100%' }}
+                disabled={pets.length === 0}
+              >
+                <Swords size={20} />
+                ⚔️ Fight Arena
               </button>
 
               {showMintForm && (

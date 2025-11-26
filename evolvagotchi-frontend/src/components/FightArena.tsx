@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { oneClient } from '../services/OneChainService'
 import { ONECHAIN_CONFIG } from '../config/onechain'
+import { getBattleCommentary } from '../services/groqService'
 import './FightArena.css'
 
 interface Pet {
@@ -177,10 +178,34 @@ export function FightArena({ myPets, onBack }: { myPets: Pet[], onBack: () => vo
     
     const round = battleLog.length
     const isFinalBlow = newMyHealth <= 0 || newOpponentHealth <= 0
+    const isFirstAttack = round === 0
+    const defenderHealthRemaining = currentTurn === 'mine' ? newOpponentHealth : newMyHealth
     
-    // Create battle message with ACTUAL damage
-    let battleMessage = `⚔️ ${attacker.name} attacks ${defender.name}!\n`
-    battleMessage += `💥 ${attackPower} ATK - ${defensePower} DEF = ${damage} damage dealt!`
+    // Get AI commentary
+    let battleMessage = ''
+    try {
+      const commentary = await getBattleCommentary({
+        attackerName: attacker.name,
+        attackerStage: attacker.stage,
+        attackerHappiness: attacker.happiness,
+        attackerHunger: attacker.hunger,
+        defenderName: defender.name,
+        defenderStage: defender.stage,
+        defenderHappiness: defender.happiness,
+        defenderHunger: defender.hunger,
+        damage,
+        defenderHealthRemaining,
+        isFirstAttack,
+        isFinalBlow
+      })
+      battleMessage = commentary
+    } catch (error) {
+      // Fallback to basic message
+      battleMessage = `💥 ${attacker.name} strikes ${defender.name} for ${damage} damage!`
+    }
+    
+    // Add technical details
+    battleMessage += `\n📊 ${attackPower} ATK - ${defensePower} DEF = ${damage} HP`
     
     if (isFinalBlow) {
       battleMessage += `\n🏆 KNOCKOUT! ${defender.name} is defeated!`
@@ -424,7 +449,7 @@ export function FightArena({ myPets, onBack }: { myPets: Pet[], onBack: () => vo
         <h1 className="arena-title">⚔️ FIGHT ARENA ⚔️</h1>
         <p className="arena-subtitle">Challenge other pets to epic battles!</p>
         <div style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>
-          v2.0 - Balanced Damage System ✅
+          v2.1 - AI Commentary Enabled 🤖✨
         </div>
       </div>
 

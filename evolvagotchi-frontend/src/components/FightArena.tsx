@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { useCurrentAccount } from '@mysten/dapp-kit'
 import { oneClient } from '../services/OneChainService'
 import { ONECHAIN_CONFIG } from '../config/onechain'
 import './FightArena.css'
@@ -22,8 +21,6 @@ interface BattleLog {
 }
 
 export function FightArena({ myPets, onBack }: { myPets: Pet[], onBack: () => void }) {
-  const account = useCurrentAccount()
-  
   const [opponentAddress, setOpponentAddress] = useState('')
   const [opponentPets, setOpponentPets] = useState<Pet[]>([])
   const [selectedMyPet, setSelectedMyPet] = useState<Pet | null>(null)

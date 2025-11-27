@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { OneChainService } from '../services/OneChainService';
 
@@ -10,6 +10,8 @@ export const useOnePet = () => {
   const [octBalance, setOctBalance] = useState<string>("0");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localPending, setLocalPending] = useState(false);
+  const timeoutRef = useRef<number | null>(null);
 
   // Log wallet connection status
   useEffect(() => {
@@ -54,6 +56,15 @@ export const useOnePet = () => {
     return () => clearInterval(interval);
   }, [refreshData]);
 
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
   // --- 2. TRANSACTION HANDLER ---
   const executeTx = async (txBuilder: () => Promise<any> | any, successMessage: string) => {
     if (!account) {
@@ -61,12 +72,25 @@ export const useOnePet = () => {
       return;
     }
 
-    if (isPending) {
+    if (isPending || localPending) {
       console.log("Transaction already pending, please wait...");
       return;
     }
 
     setError(null);
+    setLocalPending(true);
+
+    // Clear any existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    // Set timeout to reset pending state after 30 seconds
+    timeoutRef.current = setTimeout(() => {
+      console.log("Transaction timeout - resetting state");
+      setLocalPending(false);
+      setError("Transaction timeout. Please try again.");
+    }, 30000);
 
     try {
       // A. Build the Transaction Block (using our Service)
@@ -83,6 +107,10 @@ export const useOnePet = () => {
           onSuccess: (result) => {
             console.log(successMessage, result);
             setError(null);
+            setLocalPending(false);
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+            }
             // C. Wait a moment for indexing, then refresh
             setTimeout(refreshData, 1000); 
           },
@@ -90,6 +118,10 @@ export const useOnePet = () => {
             console.error("Transaction failed:", err);
             console.error("Error details:", JSON.stringify(err, null, 2));
             setError(`Transaction failed: ${err.message || 'Unknown error'}`);
+            setLocalPending(false);
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+            }
           }
         }
       );
@@ -97,6 +129,10 @@ export const useOnePet = () => {
       console.error("Build failed:", err);
       console.error("Build error details:", err.stack);
       setError(err.message || "Failed to build transaction");
+      setLocalPending(false);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
     }
   };
 
@@ -136,7 +172,7 @@ export const useOnePet = () => {
     loading,
     error,
     isConnected: !!account,
-    isPending,
+    isPending: isPending || localPending,
     refreshData,
     actions: {
       mintPet,

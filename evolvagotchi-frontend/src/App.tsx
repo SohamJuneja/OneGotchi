@@ -4,10 +4,10 @@ import { EvolvagotchiGame } from './components/EvolvagotchiGame'
 import '@mysten/dapp-kit/dist/index.css'
 import './App.css'
 
-// Use proxy in development, direct URL in production
+// Use proxy in both development and production to avoid CORS
 const rpcUrl = import.meta.env.DEV 
   ? 'http://localhost:5173/onechain-rpc'
-  : 'https://rpc-testnet.onelabs.cc:443';
+  : '/api/onechain-rpc';
 
 // Setup OneChain Config with custom network
 const { networkConfig } = createNetworkConfig({

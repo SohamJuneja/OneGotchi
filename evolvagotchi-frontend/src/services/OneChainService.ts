@@ -3,10 +3,10 @@ import { Transaction } from '@mysten/sui/transactions';
 import { bcs } from '@mysten/sui/bcs';
 import { ONECHAIN_CONFIG } from '../config/onechain';
 
-// Use proxy in development to avoid CORS issues
+// Use proxy in both development and production to avoid CORS issues
 const rpcUrl = import.meta.env.DEV 
   ? '/onechain-rpc' 
-  : ONECHAIN_CONFIG.rpcUrl;
+  : '/api/onechain-rpc';
 
 // Initialize Client
 export const oneClient = new SuiClient({ url: rpcUrl });
